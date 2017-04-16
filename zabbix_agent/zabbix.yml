@@ -1,0 +1,77 @@
+---
+- hosts: target
+  vars:
+      zabbix_server: 192.168.110.44
+      zabbix_server_port: 10051
+      zabbix_agent_port: 10050
+      zabbix_login: login
+      zabbix_pass: pass
+      zabbix_url: https://zabbix.ru
+
+  tasks:
+      - name: install zabbix repo
+        yum:
+            name: https://repo.zabbix.com/zabbix/3.2/rhel/7/x86_64/zabbix-release-3.2-1.el7.noarch.rpm
+            state: installed
+
+      - name: install zabbix agent
+        yum:
+            name: zabbix-agent
+            state: installed
+
+      - name: make zabbix config
+        template:
+            src: zabbix_agentd.conf.j2
+            dest: /etc/zabbix/zabbix_agentd.conf
+            owner: root
+            group: root
+            mode: 0644
+        notify:
+            - restart zabbix-agent
+
+      - name: allow port {{ zabbix_agent_port }} in iptables
+        iptables: chain=INPUT action=insert ctstate=NEW protocol=tcp match=tcp destination_port={{ zabbix_agent_port }} jump=ACCEPT
+
+      - name: iptables save
+        command: service iptables save
+
+      - name: Add first group to zabbix web
+        local_action: command python -c 'from pyzabbix import ZabbixAPI; zapi = ZabbixAPI("{{ zabbix_url }}"); zapi.login("{{ zabbix_login }}", "{{ zabbix_pass }}"); group1 = zapi.hostgroup.create(name="{{ inventory_hostname.split('.')[1] }}")'
+        ignore_errors: yes
+
+      - name: Add second group to zabbix web
+        local_action: command python -c 'from pyzabbix import ZabbixAPI; zapi = ZabbixAPI("{{ zabbix_url }}"); zapi.login("{{ zabbix_login }}", "{{ zabbix_pass }}"); group2 = zapi.hostgroup.create(name="{{ inventory_hostname.split('.')[2] }}")'
+        ignore_errors: yes
+
+      - name: Add grants on groups
+        local_action: command python /Users/ossidorenkov/ansible/playbooks/zabbix_agent/add_grants.py
+
+      - name: Create a new host or update an existing host's info
+        local_action:
+          module: zabbix_host
+          server_url: "{{ zabbix_url }}"
+          login_user: "{{ zabbix_login }}"
+          login_password: "{{ zabbix_pass }}"
+          host_name: "{{ inventory_hostname }}"
+          host_groups:
+            - "{{ inventory_hostname.split('.')[1] }}"
+            - "{{ inventory_hostname.split('.')[2] }}"
+          link_templates:
+            - Template OS Linux
+          status: enabled
+          state: present
+          inventory_mode: automatic
+          interfaces:
+            - type: 1
+              main: 1
+              useip: 0
+              ip: ""
+              dns: "{{ inventory_hostname }}"
+              port: "{{ zabbix_agent_port }}"
+
+  handlers:
+      - name: restart zabbix-agent
+        service:
+            name: zabbix-agent
+            state: restarted
+            enabled: yes
