@@ -1,7 +1,7 @@
 ---
 - hosts: target
   vars:
-      zabbix_server: 192.168.110.44
+      zabbix_server: zabbix.lc
       zabbix_server_port: 10051
       zabbix_agent_port: 10050
       zabbix_login: login
